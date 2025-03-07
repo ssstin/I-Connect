@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 import time
 
-from speechtospeech.can_to_eng import Can_to_eng
-from speechtospeech.eng_to_can import Eng_to_can
+from speechtospeech import Can_to_eng, Eng_to_can
+
 
 def main():
     # Set page configuration
