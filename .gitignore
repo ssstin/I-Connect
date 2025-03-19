@@ -138,6 +138,7 @@ ENV/
 env.bak/
 venv.bak/
 jjask
+myvenv
 
 # Spyder project settings
 .spyderproject

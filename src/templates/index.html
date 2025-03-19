@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech Translator</title>
+    <style>
+        /* Minimal styling for better performance */
+        body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
+        button, select { font-size: 16px; padding: 8px 15px; margin-top: 15px; }
+        #output { margin-top: 20px; font-size: 18px; }
+        #video-container { display: none; margin: 15px auto; max-width: 320px; }
+        #gesture-info { display: none; margin-top: 10px; padding: 8px; background-color: #f0f8ff; }
+        #video-output { width: 100%; height: auto; }
+        .tab-container { display: flex; justify-content: center; margin-bottom: 15px; }
+        .tab { padding: 8px 15px; margin: 0 5px; cursor: pointer; border: 1px solid #ddd; }
+        .tab.active { background-color: #0074cc; color: white; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .history-item { background-color: #f9f9f9; padding: 8px; margin-bottom: 8px; border-left: 3px solid #0074cc; }
+    </style>
+</head>
+<body>
+    <h1>🗣️ Speech Translator</h1>
+    
+    <!-- Tabs -->
+    <div class="tab-container">
+        <div class="tab active" onclick="openTab('speech-tab')">Speech</div>
+        <div class="tab" onclick="openTab('gesture-tab')">Hand Gesture</div>
+        <div class="tab" onclick="openTab('history-tab')">History</div>
+    </div>
+    
+    <!-- Speech Translation Tab -->
+    <div id="speech-tab" class="tab-content active">
+        <select id="language-select">
+            <option value="can_to_eng">Cantonese → English</option>
+            <option value="eng_to_can">English → Cantonese</option>
+        </select>
+
+        <br>
+        <button id="record-btn" onclick="startRecording()">🎤 Start Recording</button>
+        <button id="stop-btn" onclick="stopRecording()" style="display:none;">⏹️ Stop</button>
+
+        <div id="output">
+            <p><strong>Cantonese:</strong> <span id="cantonese-text">-</span></p>
+            <p><strong>English:</strong> <span id="english-text">-</span></p>
+        </div>
+    </div>
+    
+    <!-- Hand Gesture Tab -->
+    <div id="gesture-tab" class="tab-content">
+        <button id="start-webcam-btn" onclick="startWebcam()">📹 Start Webcam</button>
+        <button id="stop-webcam-btn" onclick="stopWebcam()" style="display:none;">⏹️ Stop</button>
+        
+        <div id="video-container">
+            <video id="webcam-input" autoplay playsinline style="display: none;"></video>
+            <canvas id="webcam-canvas" style="display: none;"></canvas>
+            <img id="video-output" src="" alt="Hand gesture recognition">
+        </div>
+        
+        <div id="gesture-info">
+            <p><strong>Hand Sign:</strong> <span id="hand-sign">-</span></p>
+            <p><strong>Finger Gesture:</strong> <span id="finger-gesture">-</span></p>
+        </div>
+    </div>
+    
+    <!-- Translation History Tab -->
+    <div id="history-tab" class="tab-content">
+        <h2>History</h2>
+        <div id="history-list"></div>
+    </div>
+
+    <script>
+        // Global variables - minimized
+        let socket, mediaRecorder, audioChunks = [], webcamStream, gestureSocket;
+        let selectedLanguage = "can_to_eng";
+        let isProcessingFrame = false, webcamInterval;
+        let translationHistory = [];
+        const historyMaxLength = 20; // Limit history for memory conservation
+        
+        // Tab handling - simplified
+        function openTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+            
+            document.getElementById(tabId).classList.add('active');
+            document.querySelector(`.tab[onclick*="${tabId}"]`).classList.add('active');
+            
+            // Clean up resources when switching tabs
+            if (tabId === 'gesture-tab' && mediaRecorder && mediaRecorder.state !== 'inactive') {
+                stopRecording();
+            }
+            
+            if (tabId !== 'gesture-tab' && webcamStream) {
+                stopWebcam();
+            }
+            
+            if (tabId === 'history-tab') {
+                updateHistoryList();
+            }
+        }
+    
+        document.getElementById("language-select").addEventListener("change", function () {
+            if (socket) socket.close();
+            selectedLanguage = this.value;
+        });
+
+        // Speech Translation
+        function startRecording() {
+            document.getElementById("record-btn").style.display = "none";
+            document.getElementById("stop-btn").style.display = "inline";
+    
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    audioChunks = [];
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.ondataavailable = event => {
+                        if (event.data.size > 0) audioChunks.push(event.data);
+                    };
+                    mediaRecorder.onstop = sendAudioToServer;
+                    mediaRecorder.start();
+                })
+                .catch(error => {
+                    console.error("❌ Error accessing microphone:", error);
+                    document.getElementById("record-btn").style.display = "inline";
+                    document.getElementById("stop-btn").style.display = "none";
+                });
+    
+            if (!socket || socket.readyState === WebSocket.CLOSED) {
+                socket = new WebSocket("ws://" + window.location.host + "/" + selectedLanguage);
+                
+                socket.onopen = () => console.log("WebSocket connected!");
+                
+                socket.onmessage = event => {
+                    try {
+                        let data = JSON.parse(event.data);
+                        
+                        // Update UI
+                        if (selectedLanguage === "can_to_eng") {
+                            document.getElementById("cantonese-text").innerText = data.original || "-";
+                            document.getElementById("english-text").innerText = data.translated || "-";
+                        } else {
+                            document.getElementById("english-text").innerText = data.original || "-";
+                            document.getElementById("cantonese-text").innerText = data.translated || "-";
+                        }
+                        
+                        // Add to history with limits
+                        if (data.original && data.translated) {
+                            let timestamp = new Date().toLocaleTimeString();
+                            let direction = selectedLanguage === "can_to_eng" ? "Cantonese → English" : "English → Cantonese";
+                            
+                            addToHistory({
+                                timestamp: timestamp,
+                                direction: direction,
+                                original: data.original,
+                                translated: data.translated
+                            });
+                        }
+                    } catch (error) {
+                        console.error("Error parsing message:", error);
+                    }
+                };
+            }
+        }
+    
+        function stopRecording() {
+            document.getElementById("stop-btn").style.display = "none";
+            document.getElementById("record-btn").style.display = "inline";
+            
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop();
+                if (mediaRecorder.stream) {
+                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                }
+            }
+        }
+    
+        function sendAudioToServer() {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                console.error("WebSocket not open");
+                return;
+            }
+    
+            let audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+            audioChunks = [];
+    
+            let reader = new FileReader();
+            reader.readAsArrayBuffer(audioBlob);
+            reader.onloadend = () => socket.send(reader.result);
+        }
+        
+        // Hand Gesture Recognition - optimized for Pi
+        function startWebcam() {
+            document.getElementById("start-webcam-btn").style.display = "none";
+            document.getElementById("stop-webcam-btn").style.display = "inline";
+            document.getElementById("video-container").style.display = "block";
+            document.getElementById("gesture-info").style.display = "block";
+            
+            const videoElement = document.getElementById('webcam-input');
+            const canvasElement = document.getElementById('webcam-canvas');
+            
+            // Request webcam with lower resolution
+            const constraints = { 
+                video: { 
+                    width: { ideal: 320 },
+                    height: { ideal: 240 },
+                    frameRate: { ideal: 15 }
+                } 
+            };
+            
+            navigator.mediaDevices.getUserMedia(constraints)
+                .then(stream => {
+                    webcamStream = stream;
+                    videoElement.srcObject = stream;
+                    
+                    videoElement.addEventListener('loadedmetadata', () => {
+                        canvasElement.width = videoElement.videoWidth;
+                        canvasElement.height = videoElement.videoHeight;
+                        
+                        connectGestureWebSocket();
+                        
+                        // Reduced frame rate for Pi - 5 FPS
+                        webcamInterval = setInterval(processVideoFrame, 200);
+                    });
+                })
+                .catch(error => {
+                    console.error("Error accessing webcam:", error);
+                    stopWebcam();
+                });
+        }
+        
+        function stopWebcam() {
+            document.getElementById("stop-webcam-btn").style.display = "none";
+            document.getElementById("start-webcam-btn").style.display = "inline";
+            
+            if (webcamInterval) {
+                clearInterval(webcamInterval);
+                webcamInterval = null;
+            }
+            
+            if (webcamStream) {
+                webcamStream.getTracks().forEach(track => track.stop());
+                webcamStream = null;
+            }
+            
+            if (gestureSocket) {
+                gestureSocket.close();
+                gestureSocket = null;
+            }
+            
+            document.getElementById("video-output").src = "";
+            document.getElementById("hand-sign").innerText = "-";
+            document.getElementById("finger-gesture").innerText = "-";
+            document.getElementById("video-container").style.display = "none";
+            document.getElementById("gesture-info").style.display = "none";
+        }
+        
+        function connectGestureWebSocket() {
+            if (!gestureSocket || gestureSocket.readyState === WebSocket.CLOSED) {
+                gestureSocket = new WebSocket("ws://" + window.location.host + "/hand_gesture");
+                
+                gestureSocket.onopen = () => console.log("Hand Gesture WebSocket connected!");
+                
+                gestureSocket.onmessage = event => {
+                    try {
+                        let data = JSON.parse(event.data);
+                        
+                        // If the server skipped processing, just continue
+                        if (data.status === "skipped") {
+                            isProcessingFrame = false;
+                            return;
+                        }
+                        
+                        // Update the processed image
+                        if (data.processed_image) {
+                            document.getElementById("video-output").src = data.processed_image;
+                        }
+                        
+                        // Update gesture info
+                        if (data.gesture) {
+                            document.getElementById("hand-sign").innerText = data.gesture.hand_sign || "-";
+                            document.getElementById("finger-gesture").innerText = data.gesture.finger_gesture || "-";
+                            
+                            // Add significant gestures to history (sparingly)
+                            if (data.gesture.hand_sign && data.gesture.hand_sign !== "None" && 
+                                data.gesture.finger_gesture && data.gesture.finger_gesture !== "None") {
+                                    
+                                // Only record gestures every 2 seconds to save memory
+                                const now = Date.now();
+                                if (!window.lastGestureRecorded || now - window.lastGestureRecorded > 2000) {
+                                    window.lastGestureRecorded = now;
+                                    
+                                    addToHistory({
+                                        timestamp: new Date().toLocaleTimeString(),
+                                        direction: "Hand Gesture",
+                                        original: data.gesture.hand_sign,
+                                        translated: data.gesture.finger_gesture
+                                    });
+                                }
+                            }
+                        }
+                        
+                        isProcessingFrame = false;
+                    } catch (error) {
+                        console.error("Error parsing gesture data:", error);
+                        isProcessingFrame = false;
+                    }
+                };
+                
+                gestureSocket.onerror = () => {
+                    isProcessingFrame = false;
+                };
+            }
+        }
+        
+        function processVideoFrame() {
+            if (!webcamStream || !gestureSocket || gestureSocket.readyState !== WebSocket.OPEN || isProcessingFrame) {
+                return;
+            }
+            
+            isProcessingFrame = true;
+            
+            const videoElement = document.getElementById('webcam-input');
+            const canvasElement = document.getElementById('webcam-canvas');
+            const canvasCtx = canvasElement.getContext('2d');
+            
+            // Draw video frame to canvas
+            canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+            
+            // Use lower quality jpeg for Pi
+            const imageData = canvasElement.toDataURL('image/jpeg', 0.5);
+            
+            // Send to server
+            gestureSocket.send(JSON.stringify({ image: imageData }));
+        }
+        
+        // History functions - optimized
+        function addToHistory(item) {
+            // Add to front of array for newest first
+            translationHistory.unshift(item);
+            
+            // Limit history length for memory conservation
+            if (translationHistory.length > historyMaxLength) {
+                translationHistory.pop();
+            }
+            
+            // Update if history tab is active
+            if (document.getElementById('history-tab').classList.contains('active')) {
+                updateHistoryList();
+            }
+        }
+        
+        function updateHistoryList() {
+            const historyList = document.getElementById('history-list');
+            if (!historyList) return;
+            
+            // Clear current history
+            historyList.innerHTML = '';
+            
+            // Add history items (already in newest first order)
+            for (let i = 0; i < translationHistory.length; i++) {
+                const item = translationHistory[i];
+                
+                const historyItem = document.createElement('div');
+                historyItem.className = 'history-item';
+                historyItem.innerHTML = `
+                    <div><b>${item.timestamp} - ${item.direction}</b></div>
+                    <div>Source: ${item.original}</div>
+                    <div>Translation: ${item.translated}</div>
+                `;
+                
+                historyList.appendChild(historyItem);
+            }
+            
+            // Show message if no history
+            if (translationHistory.length === 0) {
+                historyList.innerHTML = '<p>No translations yet.</p>';
+            }
+        }
+    </script>
+</body>
+</html>

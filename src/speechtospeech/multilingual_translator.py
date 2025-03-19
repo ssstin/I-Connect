@@ -1,7 +1,7 @@
 import speech_recognition as sr
 from gtts import gTTS
 from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer
-from playsound import playsound
+import pygame
 import os
 import tempfile
 
@@ -29,7 +29,7 @@ class MultilingualTranslator:
             tts = gTTS(text=text, lang='en')
             tts.save(temp_filename)
         
-        playsound(temp_filename)
+        pygame(temp_filename)
         try:
             os.unlink(temp_filename)
         except:

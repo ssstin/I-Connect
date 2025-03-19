@@ -1,160 +1,117 @@
 import speech_recognition as sr
 from gtts import gTTS
+import torch
+from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC, M2M100ForConditionalGeneration, M2M100Tokenizer
+from pydub import AudioSegment
+import numpy as np
 import os
 import tempfile
-from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer
-from playsound import playsound
+import pygame
 
+class Eng_to_can:
+    recognizer = sr.Recognizer()
 
-class Eng_to_can(object):
-    
+    # Load ASR model for English
+    model_name = "facebook/wav2vec2-large-960h"
+    processor = Wav2Vec2Processor.from_pretrained(model_name)
+    model = Wav2Vec2ForCTC.from_pretrained(model_name)
+
+    # Load translation model (English to Chinese)
+    translation_model_name = "facebook/m2m100_418M"
+    translation_tokenizer = M2M100Tokenizer.from_pretrained(translation_model_name)
+    translation_model = M2M100ForConditionalGeneration.from_pretrained(translation_model_name)
+
     @classmethod
-    def speakText(cls, command):
+    def translate_audio(cls, audio_path):
         """
-        Function to convert text to speech using gTTS.
-        Attempts to use Cantonese first, then falls back to Mandarin if needed.
+        Processes an audio file, transcribes it in English, translates to Chinese, and returns the text.
+        """
+        print(f"✅ Translating English audio: {audio_path}")
 
-        Args:
-            command (str): The text to be spoken.
-        """
-        print(f"Speaking in Cantonese: {command}")
+        try:
+            # 1. Load and process audio file
+            audio = AudioSegment.from_file(audio_path)
+            audio = audio.set_frame_rate(16000).set_channels(1)
+            samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
+
+            # Normalize audio (keeping as float32)
+            samples = samples / 32768.0  # Normalize 16-bit audio
+
+            # Do NOT add extra dimensions - keep as 1D array for wav2vec input
+            audio_input = torch.tensor(samples)
+
+            # 3. ASR (English Speech to Text)
+            inputs = cls.processor(audio_input, sampling_rate=16000, return_tensors="pt")
+            
+            with torch.no_grad():
+                logits = cls.model(inputs.input_values).logits
+                
+            predicted_ids = torch.argmax(logits, dim=-1)
+            english_text = cls.processor.batch_decode(predicted_ids)[0]
+
+            # Only proceed if we got valid text
+            if english_text and english_text.strip():
+                # 4. Translate English to Chinese
+                translated_text = cls.translate_text(english_text)
+
+                print(f"✅ Transcription (English): {english_text}")
+                print(f"✅ Translation (Chinese): {translated_text}")
+
+                # 5. Convert translated text to speech
+                cls.speak_text(translated_text)
+
+                return english_text, translated_text
+            else:
+                print("❌ No text was transcribed from the audio")
+                return None, None
+                
+        except Exception as e:
+            print(f"❌ Error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None, None
+
+    @classmethod
+    def translate_text(cls, english_text):
+        """Translates English text to Chinese (which includes Cantonese)"""
+        cls.translation_tokenizer.src_lang = "en"
+        translated = cls.translation_tokenizer(english_text, return_tensors="pt", padding=True)
         
-        # Create a temporary file to store the audio
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
-            temp_filename = temp_file.name
+        # Use "zh" for Chinese instead of "yue" for Cantonese
+        generated_tokens = cls.translation_model.generate(
+            **translated, forced_bos_token_id=cls.translation_tokenizer.get_lang_id("zh")
+        )
+        translation = cls.translation_tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)[0]
+        return translation
+
+    @classmethod
+    def speak_text(cls, text):
+        """Converts text to speech using gTTS"""
+        print(f"🔊 Speaking: {text}")
+        try:
+            # Try Cantonese first (using "yue" code for gTTS)
+            tts = gTTS(text=text, lang="yue")
+        except ValueError:
+            try:
+                # Fall back to Chinese if Cantonese not available
+                print("⚠️ Cantonese not available, falling back to Mandarin")
+                tts = gTTS(text=text, lang="zh-CN")
+            except Exception as e:
+                print(f"❌ Error with text-to-speech: {str(e)}")
+                return
+        
+        temp_filename = tempfile.mktemp(suffix=".mp3")
+        tts.save(temp_filename)
         
         try:
-            # First attempt with Cantonese (zh-yue)
-            tts = gTTS(text=command, lang='zh-yue')
-            tts.save(temp_filename)
-            print("Using Cantonese voice")
-        except ValueError as e:
+            pygame.mixer.init()
+            pygame.mixer.music.load(temp_filename)
+            pygame.mixer.music.play()
+        except Exception as e:
+            print(f"❌ Error playing audio: {str(e)}")
+        finally:
+            # Ensure temp file is cleaned up
             try:
-                # Second attempt with alternative Cantonese code
-                tts = gTTS(text=command, lang='yue')
-                tts.save(temp_filename)
-                print("Using Cantonese voice (alternative code)")
-            except ValueError as e:
-                # Fallback to Mandarin Chinese
-                print("Cantonese not available. Falling back to Mandarin Chinese")
-                tts = gTTS(text=command, lang='zh-CN')
-                tts.save(temp_filename)
-        
-        # Play the audio file
-        playsound(temp_filename)
-        
-        # Clean up the file after playing
-        try:
-            os.unlink(temp_filename)
-        except:
-            pass  # File may be in use, will be cleaned up later
-
-    @classmethod
-    def translate_english_to_cantonese_speech(cls):
-        """
-        Function to recognize speech in English and translate it to Cantonese speech.
-        """
-        recognizer = sr.Recognizer()
-
-        with sr.Microphone() as source:
-            print("Listening in English...")
-            recognizer.adjust_for_ambient_noise(source, duration=0.5)
-
-            # Listen for the user's input
-            audio = recognizer.listen(source)
-
-            try:
-                # Using Google Speech Recognition to recognize the audio in English
-                recognized_text = recognizer.recognize_google(audio)
-                print(f"Recognized Text (English): {recognized_text}")
-
-                # Translate the English text to Cantonese using M2M100
-                cantonese_translation = cls.translate_text_with_m2m100(
-                    recognized_text, "en", "zh"
-                )
-
-                print(f"Translated Text (Cantonese): {cantonese_translation}")
-
-                # Speak out the Cantonese translation
-                cls.speakText(cantonese_translation)
-
-                return recognized_text
-
-            except sr.RequestError as e:
-                print(f"Could not request results; {e}")
-            except sr.UnknownValueError:
-                print("Unknown error occurred.")
-
-    @classmethod
-    def translate_english_to_cantonese_speech_with_return(cls):
-        """
-        Function to recognize speech in English, translate it to Cantonese speech,
-        and return both the original and translated texts.
-        
-        Returns:
-            tuple: (english_text, cantonese_translation)
-        """
-        recognizer = sr.Recognizer()
-
-        with sr.Microphone() as source:
-            print("Listening in English...")
-            recognizer.adjust_for_ambient_noise(source, duration=0.5)
-
-            # Listen for the user's input
-            audio = recognizer.listen(source)
-
-            try:
-                # Using Google Speech Recognition to recognize the audio in English
-                recognized_text = recognizer.recognize_google(audio)
-                print(f"Recognized Text (English): {recognized_text}")
-
-                # Translate the English text to Cantonese using M2M100
-                cantonese_translation = cls.translate_text_with_m2m100(
-                    recognized_text, "en", "zh"
-                )
-
-                print(f"Translated Text (Cantonese): {cantonese_translation}")
-
-                # Speak out the Cantonese translation
-                cls.speakText(cantonese_translation)
-
-                return recognized_text, cantonese_translation
-
-            except sr.RequestError as e:
-                print(f"Could not request results; {e}")
-                return "", ""
-            except sr.UnknownValueError:
-                print("Unknown error occurred.")
-                return "", ""
-
-    @classmethod
-    def translate_text_with_m2m100(cls, text, source_lang, target_lang):
-        """
-        Function to translate text using M2M100 model.
-
-        Args:
-            text (str): Text to be translated.
-            source_lang (str): Source language code.
-            target_lang (str): Target language code.
-
-        Returns:
-            str: Translated text.
-        """
-        translation_model_name = "facebook/m2m100_418M"
-        translation_tokenizer = M2M100Tokenizer.from_pretrained(translation_model_name)
-        translation_model = M2M100ForConditionalGeneration.from_pretrained(
-            translation_model_name
-        )
-        # Set source and target languages for M2M100
-        translation_tokenizer.src_lang = source_lang
-        encoded_text = translation_tokenizer(text, return_tensors="pt")
-
-        # Generate translation with forced BOS token for target language
-        generated_tokens = translation_model.generate(
-            **encoded_text,
-            forced_bos_token_id=translation_tokenizer.get_lang_id(target_lang),
-        )
-        translated_text = translation_tokenizer.batch_decode(
-            generated_tokens, skip_special_tokens=True
-        )[0]
-        return translated_text
+                os.remove(temp_filename)
+            except:
+                pass
