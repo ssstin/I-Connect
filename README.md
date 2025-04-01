@@ -1,8 +1,5 @@
-# I-Connect
-
-I-Connect is an innovative communication solution developed to strengthen **Social Defence** in Singapore by overcoming communication barriers faced by the elderly and hearing-impaired communities. Originally developed for YouthxHack, this project has been enhanced with an improved Streamlit UI (replacing the original Django implementation) and optimized for edge computing deployments on Raspberry Pi.
-
-![I-Connect Logo](images/i-connectlogo.png) <!-- Replace with your logo when available -->
+<img src="images/iconnectlogo" alt="I-Connect Logo" width="40" height="40" style="vertical-align: middle;"> I-Connect
+I-Connect is an innovative communication solution developed to strengthen Social Defence in Singapore by overcoming communication barriers faced by the elderly and hearing-impaired communities. Originally developed for YouthxHack, this project has been enhanced with an improved Streamlit UI (replacing the original Django implementation) and optimized for edge computing deployments on Raspberry Pi.
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -12,10 +9,9 @@ I-Connect is an innovative communication solution developed to strengthen **Soci
 5. [Project Structure](#project-structure)
 6. [Installation](#installation)
 7. [Usage](#usage)
-8. [Edge Computing Version](#edge-computing-version)
-9. [Demo Materials](#demo-materials)
-10. [Acknowledgements](#acknowledgements)
-11. [Citations](#citations)
+8. [Demo Materials](#demo-materials)
+9. [Acknowledgements](#acknowledgements)
+10. [Citations](#citations)
 
 ## Introduction
 
@@ -122,10 +118,6 @@ streamlit run app.py
 ```
 
 Navigate to the provided URL (typically http://localhost:8501) in your web browser.
-
-## Edge Computing Version
-
-A Raspberry Pi optimized version of I-Connect is available in a separate repository forked from [Black-Seal/edgecomputing](https://github.com/Black-Seal/edgecomputing). This version uses quantized models to run efficiently on resource-constrained devices, making it suitable for deployment in community centers, elder care facilities, and other locations where dedicated translation devices are beneficial without requiring constant internet connectivity.
 
 ## Demo Materials
 
