@@ -1,4 +1,4 @@
-<img src="images/iconnectlogo" alt="I-Connect Logo" width="40" height="40" style="vertical-align: middle;"> I-Connect
+<img src="images/i-connectlogo" alt="I-Connect Logo" width="40" height="40" style="vertical-align: middle;"> I-Connect
 I-Connect is an innovative communication solution developed to strengthen Social Defence in Singapore by overcoming communication barriers faced by the elderly and hearing-impaired communities. Originally developed for YouthxHack, this project has been enhanced with an improved Streamlit UI (replacing the original Django implementation) and optimized for edge computing deployments on Raspberry Pi.
 
 ## Table of Contents
